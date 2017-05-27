@@ -1,10 +1,3 @@
-################################################################################
-# Copyright (C) 2012-2016 Leap Motion, Inc. All rights reserved.               #
-# Leap Motion proprietary and confidential. Not for distribution.              #
-# Use subject to the terms of the Leap Motion SDK Agreement available at       #
-# https://developer.leapmotion.com/sdk_agreement, or another agreement         #
-# between Leap Motion and you, your company or other organization.             #
-################################################################################
 import os, sys, inspect, thread, time
 import win32api
 import win32con
@@ -13,27 +6,40 @@ from win32api import GetSystemMetrics
 
 sys.path.append("../lib")
 src_dir = os.path.dirname(inspect.getfile(inspect.currentframe()))
-# Windows and Linux
 arch_dir = '../lib/x64' if sys.maxsize > 2**32 else '../lib/x86'
 sys.path.insert(0, os.path.abspath(os.path.join(src_dir, arch_dir)))
+
 import Leap
 
-pinch_power_threshold = 0.9
-grab_power_threshold = 0.9
+pinch_power_threshold = 0.95
+grab_power_threshold = 1
 
 # Computer screen dimensions
 screen_width = GetSystemMetrics(0)
 screen_height = GetSystemMetrics(1)
 
 # Leap control boundaries (measured from origin)
-x_bound = screen_width/10
-y_bound = screen_height/10
+scale = 0.1
+x_bound = int(screen_width * scale)
+y_bound = int(screen_height * scale)
+
+# Array for calculating hand position moving averages
+arr_len = 8
+x_array = [0] * arr_len
+y_array = [0] * arr_len
 
 left_pressed = 0
 right_pressed = 0
 
 x_val = 0
 y_val = 0
+
+
+def mov_average(array, new_value):
+    global arr_len
+    del array[0]
+    array.append(new_value)
+    return sum(array)/arr_len
 
 def map(x, in_min, in_max, out_min, out_max):
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
@@ -50,7 +56,7 @@ def leftRelease():
     left_pressed = 0
     time.sleep(0.05)
 
-def rightCLick():
+def rightClick():
     global right_pressed
     win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTDOWN,x_val,y_val,0,0)
     right_pressed = 1
@@ -82,6 +88,10 @@ class SampleListener(Leap.Listener):
     def on_frame(self, controller):
         # Get the most recent frame and report some basic information
         frame = controller.frame()
+        
+        # Give control back to mouse if no hand is detected
+        if not frame.hands:
+            return
 
         # Get hands
         hand = frame.hands[0]
@@ -90,25 +100,28 @@ class SampleListener(Leap.Listener):
         global left_pressed
         global right_pressed
 
-        handType = "Left hand" if hand.is_left else "Right hand"
+        # handType = "Left hand" if hand.is_left else "Right hand"
 
         #print " position: %s" % (hand.palm_position)
         #print "x - %s" % (hand.palm_position[0])
         #print "y - %s" % (-hand.palm_position[2])
         
-        print(screen_width)
-        print(screen_height)
-        win32api.SetCursorPos((map(int(hand.palm_position[0]), \
-                                   -x_bound, x_bound, \
-                                   0, screen_width), \
-                               map(int(hand.palm_position[2]), \
-                                   -y_bound, y_bound, \
-                                   0, screen_height)))
-        
-        x_val = map(int(hand.palm_position[0]), -x_bound, x_bound, \
+        # Map hand position to cursor position
+        new_x = map(int(hand.palm_position[0]), -x_bound, x_bound, \
                     0, screen_width)
-        y_val = map(int(hand.palm_position[2]), -y_bound, y_bound, \
+        x_val = mov_average(x_array, new_x)
+        
+        new_y = map(int(hand.palm_position[2]), -y_bound, y_bound, \
                     0, screen_height)
+        y_val = mov_average(y_array, new_y)
+        
+        win32api.SetCursorPos((x_val, y_val))
+        #win32api.SetCursorPos((map(int(hand.palm_position[0]), \
+                                   #-x_bound, x_bound, \
+                                   #0, screen_width), \
+                               #map(int(hand.palm_position[2]), \
+                                   #-y_bound, y_bound, \
+                                   #0, screen_height)))
 
         if (hand.pinch_strength > pinch_power_threshold and left_pressed == 0):
             leftClick()
@@ -116,14 +129,11 @@ class SampleListener(Leap.Listener):
         if (hand.pinch_strength <= pinch_power_threshold and left_pressed == 1):
             leftRelease()
 
-        if (hand.grab_strength > grab_power_threshold and right_pressed == 0):
-            rightCLick()
+        if (hand.grab_strength >= grab_power_threshold and right_pressed == 0):
+            rightClick()
 
-        if (hand.grab_strength <= grab_power_threshold and right_pressed == 1):
+        if (hand.grab_strength < grab_power_threshold and right_pressed == 1):
             rightRelease()
-
-        if not frame.hands.is_empty:
-            print ""
 
         for gesture in frame.gestures():
             print "gesture dir: %d, gesture pos: %d, gesture speed: %d" % (gesture.direction, gesture.position, gesture.speed)
