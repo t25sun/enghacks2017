@@ -2,8 +2,10 @@ import os, sys, inspect, thread, time
 import win32api
 import win32con
 from win32con import *
+import pyperclip
 import time
 from win32api import GetSystemMetrics
+import speech_recognition as sr
 
 sys.path.append("../lib")
 src_dir = os.path.dirname(inspect.getfile(inspect.currentframe()))
@@ -12,7 +14,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(src_dir, arch_dir)))
 
 import Leap
 
-pinch_power_threshold = 1
+pinch_power_threshold = 0.95
 grab_power_threshold = 1
 
 # Computer screen dimensions
@@ -29,20 +31,76 @@ arr_len = 20
 x_array = [0] * arr_len
 y_array = [0] * arr_len
 
+# Left/right click parameters
 left_pressed = 0
 right_pressed = 0
 
+# Cursor position
 x_val = 0
 y_val = 0
 
+# Velocity parameters
+last_vel = 0
+vel = 0
+
+# Scroll enable parameters
 init_scroll_pos_y = 0
 enable_scroll = 0
 
-thumb_detect = 0
-thumb_action = 0
-
+# Yaw tolerance
 yaw_tol = -0.2
 
+VK_CODE = {'backspace':0x08, 'enter':0x0D, 'ctrl':0x11, 'v':0x56}
+    
+def press(key):
+    '''
+    one press, one release.
+    accepts as many arguments as you want. e.g. press('left_arrow', 'a','b').
+    '''
+    win32api.keybd_event(VK_CODE[key], 0,0,0)
+    time.sleep(.05)
+    win32api.keybd_event(VK_CODE[key],0 ,win32con.KEYEVENTF_KEYUP ,0)
+
+def pressAndHold(key):
+    '''
+    press and hold. Do NOT release.
+    accepts as many arguments as you want.
+    e.g. pressAndHold('left_arrow', 'a','b').
+    '''
+    win32api.keybd_event(VK_CODE[key], 0,0,0)
+    time.sleep(.05)
+    
+def release(key):
+    '''
+    release depressed keys
+    accepts as many arguments as you want.
+    e.g. release('left_arrow', 'a','b').
+    '''
+    win32api.keybd_event(VK_CODE[key],0 ,win32con.KEYEVENTF_KEYUP ,0)
+	
+def active_listen():
+    r = sr.Recognizer()
+    with sr.Microphone() as src:
+	audio = r.listen(src)
+    msg = ''
+    try:
+	msg = r.recognize_google(audio)
+	print msg.lower()
+	pyperclip.copy(msg.lower())
+	pressAndHold('ctrl')
+	press('v')
+	release('ctrl')
+	
+    except sr.UnknownValueError:
+	print "Google Speech Recognition could not understand audio"
+	pass
+    except sr.RequestError as e:
+	print "Could not request results from Google STT; {0}".format(e)
+	pass
+    except:
+	print "Unknown exception occurred!"
+	pass
+	
 def mov_average(array, new_value):
     global arr_len
     del array[0]
@@ -75,14 +133,14 @@ def rightRelease():
     win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP,x_val,y_val,0,0)
     right_pressed = 0
     time.sleep(0.05)
-
+    
 def scrollUp():
     #Scroll one up
     win32api.mouse_event(MOUSEEVENTF_WHEEL, x_val, y_val, 1, 0)
 
 def scrollDown():
     #Scroll one down
-    win32api.mouse_event(MOUSEEVENTF_WHEEL, x_val, y_val, -1, 0)
+    win32api.mouse_event(MOUSEEVENTF_WHEEL, x_val, y_val, -1, 0)    
 
 class SampleListener(Leap.Listener):
     finger_names = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky']
@@ -104,74 +162,70 @@ class SampleListener(Leap.Listener):
     def on_frame(self, controller):
         # Get the most recent frame and report some basic information
         frame = controller.frame()
-
+        
         # Give control back to mouse if no hand is detected
         if not frame.hands:
             return
+	
+	if len(frame.hands) == 2:
+	    active_listen()
 
         # Get hands
         hand = frame.hands[0]
-        global x_val
-        global y_val
-        global left_pressed
-        global right_pressed
-
-        global enable_scroll
-        global init_scroll_pos_y
-
-        global thumb_detect
-        global thumb_action
-
-        global grab_strength
-
+        global x_val, y_val
+	global vel, last_vel
+        global left_pressed, right_pressed
+	global enable_scroll, init_scroll_pos_y	
+        
         # Map hand position to cursor position
         new_x = map(int(hand.palm_position[0]), -x_bound, x_bound, \
                     0, screen_width)
         x_val = mov_average(x_array, new_x)
-
+        
         new_y = map(int(hand.palm_position[2]), -y_bound, y_bound, \
                     0, screen_height)
         y_val = mov_average(y_array, new_y)
-
+        
         win32api.SetCursorPos((x_val, y_val))
-
-        #print hand.direction[2]
-        if (hand.pinch_strength >= pinch_power_threshold and left_pressed == 0 and
-            hand.direction[2] < yaw_tol):
+ 
+        last_vel = vel
+	vel = hand.palm_velocity[0]
+        
+        if (hand.pinch_strength > pinch_power_threshold and left_pressed == 0):
             leftClick()
 
-        if (hand.pinch_strength < pinch_power_threshold and left_pressed == 1 and
-            hand.direction[2] < yaw_tol):
+        if (hand.pinch_strength <= pinch_power_threshold and left_pressed == 1):
             leftRelease()
 
-        print hand.pinch_strength
-        if ( (hand.direction[2] > yaw_tol) and right_pressed == 0
-            and (hand.pinch_strength >= pinch_power_threshold)):
-            rightClick()
+	if (hand.grab_strength >= grab_power_threshold and enable_scroll == 0):
+	    init_scroll_pos_y = y_val
+	    enable_scroll = 1
 
-        if ( hand.direction[2] > yaw_tol and right_pressed == 1
+	if (hand.grab_strength < grab_power_threshold):
+	    init_scroll_pos_y = 0
+	    enable_scroll = 0
+
+	if (enable_scroll == 1):
+	    if ( (y_val - init_scroll_pos_y) > 5 ):
+		scrollDown()
+		init_scroll_pos_y = y_val
+	    if ( (y_val - init_scroll_pos_y) < -5 ):
+		scrollUp()
+		init_scroll_pos_y = y_val
+    
+	if ((hand.direction[2] > yaw_tol) and right_pressed == 0 
+	    and (hand.pinch_strength >= pinch_power_threshold)):
+	    rightClick()
+	
+	if ((hand.direction[2] > yaw_tol) and right_pressed == 1
             and (hand.pinch_strength < pinch_power_threshold)):
-            rightRelease()
+	    rightRelease()
 
-
-        if (hand.grab_strength >= grab_power_threshold and enable_scroll == 0):
-            global enable_scroll
-            init_scroll_pos_y = y_val
-            enable_scroll = 1
-
-        if (hand.grab_strength < grab_power_threshold):
-            global enable_scroll
-            init_scroll_pos_y = 0
-            enable_scroll = 0
-
-        if (enable_scroll == 1):
-            if ( (y_val - init_scroll_pos_y) > 75 ):
-                scrollDown()
-                init_scroll_pos_y = y_val
-            if ( (y_val - init_scroll_pos_y) < -75 ):
-                scrollUp()
-                init_scroll_pos_y = y_val
-
+        if (vel > 1000 and last_vel < 1000):
+	    press('enter')
+	    
+	if (vel < -1000 and last_vel > -1000):
+	    press('backspace')	
 
 def main():
     # Create a sample listener and controller
@@ -180,7 +234,7 @@ def main():
 
     # Have the sample listener receive events from the controller
     controller.add_listener(listener)
-
+    
     # Keep this process running until Enter is pressed
     print "Press Enter to quit..."
     try:
