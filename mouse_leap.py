@@ -83,6 +83,7 @@ def active_listen():
     with sr.Microphone() as src:
 	audio = r.listen(src)
     msg = ''
+    
     try:
 	msg = r.recognize_google(audio)
 	print msg.lower()
@@ -136,11 +137,13 @@ def rightRelease():
     
 def scrollUp():
     #Scroll one up
-    win32api.mouse_event(MOUSEEVENTF_WHEEL, x_val, y_val, 1, 0)
+    for i in range(80):
+	win32api.mouse_event(MOUSEEVENTF_WHEEL, x_val, y_val, -1, 0)
 
 def scrollDown():
     #Scroll one down
-    win32api.mouse_event(MOUSEEVENTF_WHEEL, x_val, y_val, -1, 0)    
+    for i in range(80):
+	win32api.mouse_event(MOUSEEVENTF_WHEEL, x_val, y_val, 1, 0)    
 
 class SampleListener(Leap.Listener):
     finger_names = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky']
@@ -168,7 +171,11 @@ class SampleListener(Leap.Listener):
             return
 	
 	if len(frame.hands) == 2:
-	    active_listen()
+	    leftHand = frame.hands[0]
+	    rightHand = frame.hands[1]
+	    if (leftHand.grab_strength >= grab_power_threshold and
+	        rightHand.grab_strength >= grab_power_threshold):
+		active_listen()
 
         # Get hands
         hand = frame.hands[0]
@@ -206,10 +213,10 @@ class SampleListener(Leap.Listener):
 	    enable_scroll = 0
 
 	if (enable_scroll == 1):
-	    if ( (y_val - init_scroll_pos_y) > 5 ):
+	    if ( (y_val - init_scroll_pos_y) > 50 ):
 		scrollDown()
 		init_scroll_pos_y = y_val
-	    if ( (y_val - init_scroll_pos_y) < -5 ):
+	    if ( (y_val - init_scroll_pos_y) < -50 ):
 		scrollUp()
 		init_scroll_pos_y = y_val
     
