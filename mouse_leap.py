@@ -1,6 +1,7 @@
 import os, sys, inspect, thread, time
 import win32api
 import win32con
+from win32con import *
 import time
 from win32api import GetSystemMetrics
 
@@ -11,7 +12,7 @@ sys.path.insert(0, os.path.abspath(os.path.join(src_dir, arch_dir)))
 
 import Leap
 
-pinch_power_threshold = 0.95
+pinch_power_threshold = 1
 grab_power_threshold = 1
 
 # Computer screen dimensions
@@ -24,7 +25,7 @@ x_bound = int(screen_width * scale)
 y_bound = int(screen_height * scale)
 
 # Array for calculating hand position moving averages
-arr_len = 8
+arr_len = 20
 x_array = [0] * arr_len
 y_array = [0] * arr_len
 
@@ -34,6 +35,13 @@ right_pressed = 0
 x_val = 0
 y_val = 0
 
+init_scroll_pos_y = 0
+enable_scroll = 0
+
+thumb_detect = 0
+thumb_action = 0
+
+yaw_tol = -0.2
 
 def mov_average(array, new_value):
     global arr_len
@@ -68,6 +76,14 @@ def rightRelease():
     right_pressed = 0
     time.sleep(0.05)
 
+def scrollUp():
+    #Scroll one up
+    win32api.mouse_event(MOUSEEVENTF_WHEEL, x_val, y_val, 1, 0)
+
+def scrollDown():
+    #Scroll one down
+    win32api.mouse_event(MOUSEEVENTF_WHEEL, x_val, y_val, -1, 0)
+
 class SampleListener(Leap.Listener):
     finger_names = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky']
     bone_names = ['Metacarpal', 'Proximal', 'Intermediate', 'Distal']
@@ -88,7 +104,7 @@ class SampleListener(Leap.Listener):
     def on_frame(self, controller):
         # Get the most recent frame and report some basic information
         frame = controller.frame()
-        
+
         # Give control back to mouse if no hand is detected
         if not frame.hands:
             return
@@ -100,46 +116,61 @@ class SampleListener(Leap.Listener):
         global left_pressed
         global right_pressed
 
-        # handType = "Left hand" if hand.is_left else "Right hand"
+        global enable_scroll
+        global init_scroll_pos_y
 
-        #print " position: %s" % (hand.palm_position)
-        #print "x - %s" % (hand.palm_position[0])
-        #print "y - %s" % (-hand.palm_position[2])
-        
+        global thumb_detect
+        global thumb_action
+
+        global grab_strength
+
         # Map hand position to cursor position
         new_x = map(int(hand.palm_position[0]), -x_bound, x_bound, \
                     0, screen_width)
         x_val = mov_average(x_array, new_x)
-        
+
         new_y = map(int(hand.palm_position[2]), -y_bound, y_bound, \
                     0, screen_height)
         y_val = mov_average(y_array, new_y)
-        
-        win32api.SetCursorPos((x_val, y_val))
-        #win32api.SetCursorPos((map(int(hand.palm_position[0]), \
-                                   #-x_bound, x_bound, \
-                                   #0, screen_width), \
-                               #map(int(hand.palm_position[2]), \
-                                   #-y_bound, y_bound, \
-                                   #0, screen_height)))
 
-        if (hand.pinch_strength > pinch_power_threshold and left_pressed == 0):
+        win32api.SetCursorPos((x_val, y_val))
+
+        #print hand.direction[2]
+        if (hand.pinch_strength >= pinch_power_threshold and left_pressed == 0 and
+            hand.direction[2] < yaw_tol):
             leftClick()
 
-        if (hand.pinch_strength <= pinch_power_threshold and left_pressed == 1):
+        if (hand.pinch_strength < pinch_power_threshold and left_pressed == 1 and
+            hand.direction[2] < yaw_tol):
             leftRelease()
 
-        if (hand.grab_strength >= grab_power_threshold and right_pressed == 0):
+        print hand.pinch_strength
+        if ( (hand.direction[2] > yaw_tol) and right_pressed == 0
+            and (hand.pinch_strength >= pinch_power_threshold)):
             rightClick()
 
-        if (hand.grab_strength < grab_power_threshold and right_pressed == 1):
+        if ( hand.direction[2] > yaw_tol and right_pressed == 1
+            and (hand.pinch_strength < pinch_power_threshold)):
             rightRelease()
 
-        for gesture in frame.gestures():
-            print "gesture dir: %d, gesture pos: %d, gesture speed: %d" % (gesture.direction, gesture.position, gesture.speed)
-            if gesture.type is Leap.Gesture.TYPE_SWIPE:
-                swipe = Leap.SwipeGesture(gesture)
-                print "hello"
+
+        if (hand.grab_strength >= grab_power_threshold and enable_scroll == 0):
+            global enable_scroll
+            init_scroll_pos_y = y_val
+            enable_scroll = 1
+
+        if (hand.grab_strength < grab_power_threshold):
+            global enable_scroll
+            init_scroll_pos_y = 0
+            enable_scroll = 0
+
+        if (enable_scroll == 1):
+            if ( (y_val - init_scroll_pos_y) > 75 ):
+                scrollDown()
+                init_scroll_pos_y = y_val
+            if ( (y_val - init_scroll_pos_y) < -75 ):
+                scrollUp()
+                init_scroll_pos_y = y_val
 
 
 def main():
