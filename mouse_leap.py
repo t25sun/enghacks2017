@@ -1,10 +1,10 @@
 import os, sys, inspect, thread, time
 import win32api
+from win32api import GetSystemMetrics
 import win32con
 from win32con import *
 import pyperclip
 import time
-from win32api import GetSystemMetrics
 import speech_recognition as sr
 
 sys.path.append("../lib")
@@ -17,41 +17,43 @@ import Leap
 pinch_power_threshold = 0.95
 grab_power_threshold = 1
 
-# Computer screen dimensions
+#Computer screen dimensions
 screen_width = GetSystemMetrics(0)
 screen_height = GetSystemMetrics(1)
 
-# Leap control boundaries (measured from origin)
+#Leap control boundaries (measured from origin)
 scale = 0.1
 x_bound = int(screen_width * scale)
 y_bound = int(screen_height * scale)
 
-# Array for calculating hand position moving averages
+#Array for calculating hand position moving averages
 arr_len = 20
 x_array = [0] * arr_len
 y_array = [0] * arr_len
 
-# Left/right click parameters
+#Left/right click parameters
 left_pressed = 0
 right_pressed = 0
 
-# Cursor position
+#Cursor position
 x_val = 0
 y_val = 0
 
-# Velocity parameters
+#Velocity parameters
 last_vel = 0
 vel = 0
 
-# Scroll enable parameters
+#Scroll enable parameters
 init_scroll_pos_y = 0
 enable_scroll = 0
 
-# Yaw tolerance
+#Yaw tolerance
 yaw_tol = -0.2
 
+#win32api keyboard codes
 VK_CODE = {'backspace':0x08, 'enter':0x0D, 'ctrl':0x11, 'v':0x56}
-    
+
+#Functions to activate key actions    
 def press(key):
     '''
     one press, one release.
@@ -77,8 +79,11 @@ def release(key):
     e.g. release('left_arrow', 'a','b').
     '''
     win32api.keybd_event(VK_CODE[key],0 ,win32con.KEYEVENTF_KEYUP ,0)
+
 	
 def active_listen():
+    '''Recogizes speech, copies it to the clipboard and pastes in the current
+    cursor location'''
     r = sr.Recognizer()
     with sr.Microphone() as src:
 	audio = r.listen(src)
@@ -86,31 +91,34 @@ def active_listen():
     
     try:
 	msg = r.recognize_google(audio)
-	print msg.lower()
+	print(msg.lower())
 	pyperclip.copy(msg.lower())
 	pressAndHold('ctrl')
 	press('v')
 	release('ctrl')
 	
     except sr.UnknownValueError:
-	print "Google Speech Recognition could not understand audio"
+	print("Google Speech Recognition could not understand audio")
 	pass
     except sr.RequestError as e:
-	print "Could not request results from Google STT; {0}".format(e)
+	print("Could not request results from Google STT; {0}".format(e))
 	pass
     except:
-	print "Unknown exception occurred!"
+	print("Unknown exception occurred!")
 	pass
 	
 def mov_average(array, new_value):
+    '''Calculates moving average of the last arr_len data values'''
     global arr_len
     del array[0]
     array.append(new_value)
     return sum(array)/arr_len
 
 def map(x, in_min, in_max, out_min, out_max):
+    '''Mapping function'''
     return (x - in_min) * (out_max - out_min) / (in_max - in_min) + out_min;
 
+#Cursor clicking functions
 def leftClick():
     global left_pressed
     win32api.mouse_event(win32con.MOUSEEVENTF_LEFTDOWN,x_val,y_val,0,0)
@@ -134,7 +142,8 @@ def rightRelease():
     win32api.mouse_event(win32con.MOUSEEVENTF_RIGHTUP,x_val,y_val,0,0)
     right_pressed = 0
     time.sleep(0.05)
-    
+
+#Scrolling functions    
 def scrollUp():
     #Scroll one up
     for i in range(80):
@@ -146,21 +155,23 @@ def scrollDown():
 	win32api.mouse_event(MOUSEEVENTF_WHEEL, x_val, y_val, 1, 0)    
 
 class SampleListener(Leap.Listener):
+    '''Function that polls data from Leap and activates corresponding 
+    functions'''
     finger_names = ['Thumb', 'Index', 'Middle', 'Ring', 'Pinky']
     bone_names = ['Metacarpal', 'Proximal', 'Intermediate', 'Distal']
 
     def on_init(self, controller):
-        print "Initialized"
+        print("Initialized")
 
     def on_connect(self, controller):
-        print "Connected"
+        print("Connected")
 
     def on_disconnect(self, controller):
         # Note: not dispatched when running in a debugger.
-        print "Disconnected"
+        print("Disconnected")
 
     def on_exit(self, controller):
-        print "Exited"
+        print("Exited")
 
     def on_frame(self, controller):
         # Get the most recent frame and report some basic information
@@ -243,7 +254,7 @@ def main():
     controller.add_listener(listener)
     
     # Keep this process running until Enter is pressed
-    print "Press Enter to quit..."
+    print("Press Enter to quit...")
     try:
         sys.stdin.readline()
     except KeyboardInterrupt:
